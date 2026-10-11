@@ -96,7 +96,7 @@
         return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
       }
       if (inner && inner.indexOf('<f') >= 0) {
-        return `<c r="${ref}"${attrs.replace(/\st="[^"]*"/, '')}>${inner.replace(/<v>[\s\S]*?<\/v>|<v\/>/, '')}</c>`;
+        return `<c r="${ref}"${attrs.replace(/\st="[^"]*"/, '')}>${inner.replace(/<v(?:\s[^>]*)?>[\s\S]*?<\/v>|<v\/>/, '')}</c>`;
       }
       return m;
     });
