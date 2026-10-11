@@ -5,7 +5,8 @@ Usage:  python tools/embed_template.py [new_template.xlsx]
 
 With an argument, the new workbook is first checked against the current tools/ copy
 (same takeoff columns, same lists, same defined names, no entered data) and then copied
-over it. js/layout.js is not regenerated: the check guarantees it still matches.
+over it. js/layout.js keeps its column map (the check guarantees it still matches); only the
+unit of each list item is refreshed from the lists sheet.
 """
 import sys, io, os, json, base64, shutil
 from openpyxl import load_workbook
@@ -67,6 +68,11 @@ def main():
             sys.exit(1)
         shutil.copyfile(sys.argv[1], CUR)
         print('copied to tools/')
+    ls = load_workbook(CUR)[LAYOUT['sheets']['LS']]
+    for df in LAYOUT['lists'].values():
+        if df['ucol']:
+            df['units'] = [ls[f"{df['ucol']}{LAYOUT['listR0'] + i}"].value or '' for i in range(len(df['items']))]
+    io.open(os.path.join(APP, 'js', 'layout.js'), 'w', encoding='utf-8', newline='\n').write('globalThis.BOQ_LAYOUT = ' + json.dumps(LAYOUT, ensure_ascii=False, indent=1) + ';\n')
     b64 = base64.b64encode(open(CUR, 'rb').read()).decode()
     io.open(os.path.join(APP, 'js', 'template.js'), 'w', encoding='utf-8', newline='\n').write('globalThis.BOQ_TEMPLATE_B64 = "' + b64 + '";\n')
     print('template.js written', len(b64))

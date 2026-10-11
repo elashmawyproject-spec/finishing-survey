@@ -31,8 +31,30 @@ const project = {
       floors: [{ mat: 'رخام', desc: 'بسطة', len: '1.2', wid: '2.5' }], walls: [] },
   ],
 };
+// second file: the same project after the materials screen edited the lists (rename, delete, new item, changed unit)
+function editedLists() {
+  const p = JSON.parse(JSON.stringify(project));
+  p.mats = globalThis.BOQ.materials(p);
+  const rename = (list, from, to) => {
+    p.mats[list].find(m => m.name === from).name = to;
+    const fix = o => { if (o && o.mat === from) o.mat = to; };
+    p.spaces.forEach(sp => { (sp.floors || []).forEach(fix); fix(sp.wall); fix(sp.skirt); fix(sp.ceil); fix(sp.plaster); (sp.walls || []).forEach(w => (w.feats || []).forEach(fix)); });
+  };
+  rename('FloorMat', 'سيراميك أرضيات', 'سيراميك 60×60');
+  rename('WallMat', 'دهانات', 'دهان بلاستيك');
+  rename('LinMat', 'نائمة درج', 'نائمة درج رخام');
+  rename('LinMat', 'شرائح ستانلس ستيل', 'فاصل ستانلس');
+  p.mats.FloorMat = p.mats.FloorMat.filter(m => !['تيرازو', 'موكيت'].includes(m.name));
+  p.mats.FloorMat.push({ name: 'بلاط أسمنتي 20×20', unit: 'م²' });
+  p.mats.OpenTypes.push({ name: 'شباك مغلق' });
+  p.mats.CeilMat.find(m => m.name === 'بلاطات معلقة').unit = 'عدد';
+  return p;
+}
 (async () => {
-  const r = await globalThis.BOQ.exportXlsx(project);
-  fs.writeFileSync(process.argv[3], Buffer.from(r.bytes));
-  console.log('written', r.bytes.length, JSON.stringify(r.counts));
+  const out = process.argv[3];
+  for (const [file, pr] of [[out, project], [out.replace(/\.xlsx$/, '') + '_lists.xlsx', editedLists()]]) {
+    const r = await globalThis.BOQ.exportXlsx(pr);
+    fs.writeFileSync(file, Buffer.from(r.bytes));
+    console.log('written', path.basename(file), r.bytes.length, JSON.stringify(r.counts));
+  }
 })().catch(e => { console.error(e); process.exit(1); });

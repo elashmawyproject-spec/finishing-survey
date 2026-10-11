@@ -1,7 +1,7 @@
 /* Finishing survey app — data stays on this device (localStorage) and is exported as an Excel BOQ workbook. */
 (function () {
   'use strict';
-  const { num, txt, quantities, exportXlsx, buildRows } = globalThis.BOQ;
+  const { num, txt, quantities, exportXlsx, buildRows, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap } = globalThis.BOQ;
   const LISTS = globalThis.BOQ_LAYOUT.lists;
   const SEED = globalThis.BOQ_SEED;
   const KEY = 'boq-survey-v2', OLD_KEY = 'boq-survey-v1';
@@ -23,7 +23,7 @@
   function setCur(id) {
     P = DB.projects.find(p => p.id === id) || null;
     DB.cur = P ? P.id : null;
-    if (P) { P.custom = P.custom || {}; P.spaces = P.spaces || []; }
+    if (P) { P.custom = P.custom || {}; P.spaces = P.spaces || []; P.mats = materials(P); }
   }
   setCur(DB.cur);
   let saveTimer = null;
@@ -52,11 +52,34 @@
     for (let i = 0; i < ks.length - 1; i++) { if (o[ks[i]] === undefined || o[ks[i]] === null) o[ks[i]] = /^\d+$/.test(ks[i + 1]) ? [] : {}; o = o[ks[i]]; }
     o[ks[ks.length - 1]] = val;
   }
-  function matItems(list) {
-    const base = LISTS[list].items;
-    const extra = ((P.custom[list]) || []).map(c => c.name).filter(n => !base.includes(n));
-    return base.concat(extra);
+  const matItems = list => P.mats[list].map(m => m.name);
+  const cleanName = s => String(s || '').trim().replace(/\s+/g, ' ').replace(/[*?]/g, '×');
+  const LIST_LABEL = { FloorMat: 'خامات الأرضيات', WallMat: 'خامات تشطيب الحوائط', LinMat: 'الوزرات والبنود الطولية', CeilMat: 'أنواع الأسقف', PlMat: 'بنود اللياسة والمحارة', OpenTypes: 'أنواع الفتحات' };
+  /* every place in the project that stores a name from `list`, as [object, key] */
+  function matRefs(list) {
+    const out = [];
+    const add = (o, k) => { if (o && txt(o[k]) && o[k] !== '-') out.push([o, k]); };
+    P.spaces.forEach(sp => {
+      if (list === 'FloorMat') (sp.floors || []).forEach(f => add(f, 'mat'));
+      if (list === 'CeilMat') add(sp.ceil, 'mat');
+      if (list === 'PlMat') add(sp.plaster, 'mat');
+      if (list === 'WallMat') add(sp.wall, 'mat');
+      if (list === 'LinMat') { add(sp.skirt, 'mat'); add(sp, 'floorStripMat'); }
+      (sp.walls || []).forEach(w => {
+        if (list === 'WallMat') add(w, 'mat');
+        if (list === 'OpenTypes') (w.ops || []).forEach(o => add(o, 'typ'));
+        (w.feats || []).forEach(f => { if (list === (f.unit === 'lm' ? 'LinMat' : 'WallMat')) add(f, 'mat'); });
+      });
+    });
+    return out;
   }
+  /* a blank space whose default plaster item follows a renamed or removed list entry */
+  function blankSpace(...a) {
+    const sp = SEED.blankSpace(...a), nm = matName(P, 'PlMat', sp.plaster.mat);
+    sp.plaster.mat = matItems('PlMat').includes(nm) ? nm : (matItems('PlMat')[0] || '');
+    return sp;
+  }
+  const matUses = (list, name) => matRefs(list).filter(([o, k]) => txt(o[k]) === name).length;
   function hasData(sp) {
     const q = quantities(sp);
     return q.floor > 0 || q.perim > 0 || (sp.kind === 'stair' && num(sp.stair && sp.stair.steps) > 0);
@@ -73,7 +96,7 @@
     const items = Array.isArray(list) ? list : matItems(list);
     if (val && val !== '-' && !items.includes(val)) items.push(val);
     items.forEach(v => { o += `<option value="${esc(v)}"${v === val ? ' selected' : ''}>${esc(v)}</option>`; });
-    if (!Array.isArray(list) && LISTS[list].ucol) o += '<option value="__new__">＋ خامة جديدة…</option>';
+    if (!Array.isArray(list)) o += '<option value="__new__">＋ خامة جديدة…</option>';
     return `<select data-p="${path}" data-list="${Array.isArray(list) ? '' : list}">${o}</select>`;
   }
   const chk = (path, on, label) => `<label class="chk"><input type="checkbox" data-p="${path}"${on ? ' checked' : ''}> ${esc(label)}</label>`;
@@ -116,6 +139,8 @@
       h += `<a class="row" href="#/floor/${encodeURIComponent(l)}"><b>${esc(l)}</b><span class="muted">${sp.filter(s => s.done).length} / ${sp.length}</span></a>`;
     });
     h += `<div class="acts"><button class="btn" data-act="addSpace">＋ فراغ جديد</button><a class="btn" href="#/add">＋ عدة فراغات مرة واحدة</a></div></section>
+      <section class="card"><h2>الخامات والبنود</h2>
+      <a class="row" href="#/mats"><b>إدارة الخامات</b><span class="muted">إضافة · تعديل اسم · وحدة · حذف</span></a></section>
       <section class="card"><h2>التصدير والحفظ</h2>
       <button class="btn primary" data-act="export">تصدير ملف Excel</button>
       <button class="btn" data-act="backup">حفظ نسخة احتياطية / إرسال المشروع (ملف)</button>
@@ -146,6 +171,28 @@
     });
     h += `<button class="btn ghost" data-act="addSpace" data-level="${esc(level)}">＋ فراغ جديد في هذا الدور</button></section>`;
     app.innerHTML = h;
+  }
+
+  function viewMats(list) {
+    titleEl.textContent = 'إدارة الخامات';
+    backEl.hidden = false; backEl.href = '#/p';
+    const items = P.mats[list], hasUnit = !!LISTS[list].ucol, locked = SYSTEM[list] || [];
+    const unitSel = (attr, val) => `<select ${attr}>${['م²', 'م.ط', 'عدد'].map(u => `<option${u === (val || DEF_UNIT[list]) ? ' selected' : ''}>${u}</option>`).join('')}</select>`;
+    let h = `<section class="card"><h2>القائمة</h2>
+      <select id="matList">${MAT_LISTS.map(l => `<option value="${l}"${l === list ? ' selected' : ''}>${esc(LIST_LABEL[l])} (${P.mats[l].length})</option>`).join('')}</select>
+      <p class="muted">${items.length} من ${listCap} خانة في ملف Excel. تعديل الاسم ينعكس فورًا على كل ما سُجّل به في هذا المشروع.</p></section>
+      <section class="card"><h2>${esc(LIST_LABEL[list])}</h2>`;
+    items.forEach((m, i) => {
+      const n = matUses(list, m.name), sys = locked.includes(m.base);
+      h += `<div class="item mat"><div class="mat-r"><input type="text" data-mat-name="${i}" value="${esc(m.name)}" autocomplete="off" aria-label="اسم الخامة">
+        ${hasUnit ? unitSel(`data-mat-unit="${i}" aria-label="الوحدة"`, m.unit) : ''}
+        ${sys ? '<span class="x off" title="بند يستخدمه التطبيق تلقائيًا">🔒</span>' : `<button class="x" data-act="matDel" data-i="${i}" aria-label="حذف">✕</button>`}</div>
+        <span class="muted">${n ? `مستخدمة في ${n} بندًا` : 'غير مستخدمة'}${sys ? ' · بند أساسي (درج / ستانلس): يُعدَّل اسمه ولا يُحذف' : ''}</span></div>`;
+    });
+    h += items.length >= listCap ? `<p class="muted">القائمة ممتلئة. احذف خامة غير مستخدمة لإضافة غيرها.</p>` :
+      `<div class="item"><b>＋ خامة جديدة</b><div class="mat-r mt"><input type="text" id="matNew" placeholder="الاسم" autocomplete="off">
+        ${hasUnit ? unitSel('id="matNewUnit" aria-label="الوحدة"', '') : ''}<button class="btn primary sm" data-act="matAdd">إضافة</button></div></div>`;
+    app.innerHTML = h + '</section>';
   }
 
   function partRows(base, parts, withMat) {
@@ -259,6 +306,7 @@
     else if (m && m[1] === 'floor') { cur = { view: 'floor', level: decodeURIComponent(m[2]) }; viewFloor(cur.level); }
     else if (m && m[1] === 'space') { cur = { view: 'space', i: Number(m[2]) }; viewSpace(cur.i); }
     else if (h === '#/add') { cur = { view: 'add' }; viewAdd(); }
+    else if (h.startsWith('#/mats')) { cur = { view: 'mats', list: MAT_LISTS.includes(h.slice(7)) ? h.slice(7) : 'FloorMat' }; viewMats(cur.list); }
     else { cur = { view: 'home' }; viewHome(); }
     window.scrollTo(0, keepScroll ? y : 0);
   }
@@ -275,11 +323,12 @@
     const p = path.replace(/^@/, '');
     if (el.tagName === 'SELECT' && val === '__new__') {
       const list = el.dataset.list;
-      const name = (prompt('اسم الخامة الجديدة:') || '').trim().replace(/[*?]/g, '×');
-      if (!name) { el.value = txt(getPath(target, p)); return; }
-      const unit = list === 'LinMat' ? 'م.ط' : 'م²';
-      P.custom[list] = P.custom[list] || [];
-      if (!matItems(list).includes(name)) P.custom[list].push({ name, unit });
+      const name = cleanName(prompt('اسم الخامة الجديدة:'));
+      if (!name || name === '-') { el.value = txt(getPath(target, p)); return; }
+      if (!matItems(list).includes(name)) {
+        if (P.mats[list].length >= listCap) { toast(`القائمة ممتلئة (${listCap}). احذف خامة غير مستخدمة من شاشة الخامات`); el.value = txt(getPath(target, p)); return; }
+        P.mats[list].push({ name, unit: DEF_UNIT[list] || '' });
+      }
       val = name;
       setPath(target, p, val); save(); route(true);
       return;
@@ -295,6 +344,29 @@
   app.addEventListener('input', e => { if (e.target.matches('input[type=text],input[type=date],textarea')) onField(e.target); });
   app.addEventListener('click', e => { const a = e.target.closest('[data-open]'); if (a) { setCur(a.dataset.open); save(); } }, true);
   app.addEventListener('change', e => { if (e.target.matches('select,input[type=checkbox]')) onField(e.target); });
+
+  // ------------------------------------------------------------ materials screen
+  function renameMat(list, i, raw) {
+    const items = P.mats[list], m = items[i], old = m.name, name = cleanName(raw);
+    if (!name || name === '-' || name === old) return;
+    const refs = matRefs(list).filter(([o, k]) => txt(o[k]) === old);
+    const other = items.findIndex((x, k) => k !== i && x.name === name);
+    if (other >= 0) {
+      if ((SYSTEM[list] || []).includes(m.base)) { alert('هذا بند أساسي يستخدمه التطبيق؛ لا يمكن دمجه في خامة أخرى.'); return; }
+      if (!confirm(`«${name}» موجودة بالفعل. دمج «${old}» فيها؟ (${refs.length} بندًا سينتقل إليها)`)) return;
+      items.splice(i, 1);
+    } else m.name = name;
+    refs.forEach(([o, k]) => { o[k] = name; });
+    save(true);
+    toast(refs.length ? `تم التعديل في ${refs.length} بندًا` : 'تم تعديل الاسم');
+  }
+  app.addEventListener('change', e => {
+    const t = e.target;
+    if (cur.view !== 'mats') return;
+    if (t.id === 'matList') { location.hash = '#/mats/' + t.value; return; }
+    if (t.dataset.matName !== undefined) { renameMat(cur.list, Number(t.dataset.matName), t.value); route(true); }
+    else if (t.dataset.matUnit !== undefined) { P.mats[cur.list][Number(t.dataset.matUnit)].unit = t.value; save(true); }
+  });
 
   // ------------------------------------------------------------ actions
   function download(bytes, name, type) {
@@ -377,7 +449,7 @@
         const stair = /^(درج|سلم|stair)/i.test(name);
         let at = -1;
         P.spaces.forEach((s, k) => { if (s.level === level) at = k; });
-        P.spaces.splice(at < 0 ? P.spaces.length : at + 1, 0, SEED.blankSpace(code, name, level, stair ? 'stair' : 'room', stair ? 0 : nw));
+        P.spaces.splice(at < 0 ? P.spaces.length : at + 1, 0, blankSpace(code, name, level, stair ? 'stair' : 'room', stair ? 0 : nw));
         added++;
       });
       save(true); toast(`أضيف ${added} فراغًا${skipped ? ` — تم تخطي ${skipped} لتكرار الكود` : ''}`);
@@ -391,7 +463,7 @@
       const name = (prompt('اسم الفراغ:') || '').trim();
       const level = b.dataset.level || (prompt('الدور (' + LEVELS.join(' / ') + '):', 'أرضي') || 'أرضي').trim();
       const isStair = /^(درج|سلم|stair)/i.test(name);
-      const sp = SEED.blankSpace(code, name, level, isStair ? 'stair' : 'room', isStair ? 0 : 4);
+      const sp = blankSpace(code, name, level, isStair ? 'stair' : 'room', isStair ? 0 : 4);
       let at = -1;
       P.spaces.forEach((s, k) => { if (s.level === level) at = k; });
       P.spaces.splice(at < 0 ? P.spaces.length : at + 1, 0, sp);
@@ -403,6 +475,19 @@
       P.spaces.splice(cur.i, 1); save(true); location.hash = '#/floor/' + encodeURIComponent(sp.level); return;
     }
     if (!P) return;
+    if (act === 'matAdd') {
+      const items = P.mats[cur.list], name = cleanName(document.getElementById('matNew').value), u = document.getElementById('matNewUnit');
+      if (!name || name === '-') { toast('اكتب اسم الخامة'); return; }
+      if (items.some(m => m.name === name)) { toast('هذه الخامة موجودة بالفعل'); return; }
+      if (items.length >= listCap) { toast('القائمة ممتلئة'); return; }
+      items.push({ name, unit: u ? u.value : '' }); save(true); route(true); return;
+    }
+    if (act === 'matDel') {
+      const items = P.mats[cur.list], m = items[d.i], n = matUses(cur.list, m.name);
+      if (n) { alert(`«${m.name}» مستخدمة في ${n} بندًا.\nلحذفها: غيّر اسمها إلى اسم الخامة الصحيحة فتُدمج فيها، أو غيّر خامة تلك البنود أولًا.`); return; }
+      if (!confirm(`حذف «${m.name}» من القائمة؟`)) return;
+      items.splice(d.i, 1); save(true); route(true); return;
+    }
     const sp = curSpace();
     if (sp && ACT[act]) { if (ACT[act](sp, d) !== false) { save(); route(true); } }
   });

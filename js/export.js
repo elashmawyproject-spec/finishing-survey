@@ -92,6 +92,7 @@
         pending.delete(ref);
         const style = (attrs.match(/\ss="\d+"/) || [''])[0];
         const v = values.get(ref);
+        if (v === null) return `<c r="${ref}"${style}/>`;
         if (typeof v === 'number') return `<c r="${ref}"${style}><v>${v}</v></c>`;
         return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
       }
@@ -100,6 +101,7 @@
       }
       return m;
     });
+    for (const ref of pending) if (values.get(ref) === null) pending.delete(ref);
     if (pending.size) throw new Error('خلايا غير موجودة في القالب: ' + [...pending].slice(0, 5).join(', '));
     return out;
   }
@@ -184,28 +186,54 @@
         });
       });
       if (skOn && perim > 0) R.LN.push({ sp: code, mat: txt(sp.skirt.mat), desc: 'وزرة — محيط الفراغ', dir: Math.round(perim * 1e4) / 1e4, autoq: YES });
-      if (num(sp.floorStrip) > 0) R.LN.push({ sp: code, mat: txt(sp.floorStripMat) || 'شرائح ستانلس ستيل', desc: 'فاصل بين خامات الأرضية', dir: num(sp.floorStrip) });
+      if (num(sp.floorStrip) > 0) R.LN.push({ sp: code, mat: txt(sp.floorStripMat) || matName(pr, 'LinMat', 'شرائح ستانلس ستيل'), desc: 'فاصل بين خامات الأرضية', dir: num(sp.floorStrip) });
       const co = sp.corners || {};
-      if (num(co.cnt) > 0 && num(co.hgt) > 0) R.LN.push({ sp: code, mat: 'زوايا ستانلس للحوائط', desc: 'زوايا الحوائط', dir: num(co.hgt), cnt: num(co.cnt) });
+      if (num(co.cnt) > 0 && num(co.hgt) > 0) R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'زوايا ستانلس للحوائط'), desc: 'زوايا الحوائط', dir: num(co.hgt), cnt: num(co.cnt) });
       const st = sp.stair || {};
       if (sp.kind === 'stair' && num(st.steps) > 0 && num(st.width) > 0) {
         const d = t => [t, txt(st.mat), num(st.tread) !== null ? 'نائمة ' + num(st.tread) : '', num(st.riser) !== null ? 'قائمة ' + num(st.riser) : ''].filter(Boolean).join(' — ');
-        R.LN.push({ sp: code, mat: 'نائمة درج', desc: d('نوائم'), dir: num(st.width), cnt: num(st.steps) });
-        R.LN.push({ sp: code, mat: 'قائمة درج', desc: d('قوائم'), dir: num(st.width), cnt: num(st.steps) });
+        R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'نائمة درج'), desc: d('نوائم'), dir: num(st.width), cnt: num(st.steps) });
+        R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'قائمة درج'), desc: d('قوائم'), dir: num(st.width), cnt: num(st.steps) });
       }
-      if (sp.kind === 'stair' && num(st.skirtLen) > 0) R.LN.push({ sp: code, mat: 'وزرة درج', desc: 'وزرة الدرج', dir: num(st.skirtLen) });
+      if (sp.kind === 'stair' && num(st.skirtLen) > 0) R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'وزرة درج'), desc: 'وزرة الدرج', dir: num(st.skirtLen) });
     }
     return R;
   }
 
-  function usedCustom(pr) {
+  /* Material lists of a project: [{name, unit, base}] per list. `base` is the template's original name, kept through renames
+     so the items the export itself writes (stair treads, stainless strips…) follow a corrected name. */
+  const MAT_LISTS = ['FloorMat', 'WallMat', 'LinMat', 'CeilMat', 'PlMat', 'OpenTypes'];
+  const SYSTEM = { LinMat: ['شرائح ستانلس ستيل', 'زوايا ستانلس للحوائط', 'نائمة درج', 'قائمة درج', 'وزرة درج'] };
+  const DEF_UNIT = { FloorMat: 'م²', WallMat: 'م²', LinMat: 'م.ط', CeilMat: 'م²', PlMat: 'م²' };
+  function materials(pr) {
     const out = {};
-    for (const [list, def] of Object.entries(L.lists)) {
-      if (!def.ucol) continue;
-      const base = new Set(def.items);
-      out[list] = ((pr.custom && pr.custom[list]) || []).filter(c => txt(c.name) && !base.has(txt(c.name)));
+    for (const list of MAT_LISTS) {
+      const def = L.lists[list];
+      if (pr.mats && Array.isArray(pr.mats[list])) { out[list] = pr.mats[list]; continue; }
+      out[list] = def.items.map((name, i) => ({ name, unit: (def.units && def.units[i]) || '', base: name }));
+      ((pr.custom && pr.custom[list]) || []).forEach(c => {
+        if (txt(c.name) && !out[list].some(m => m.name === txt(c.name))) out[list].push({ name: txt(c.name), unit: txt(c.unit) });
+      });
     }
     return out;
+  }
+  const matName = (pr, list, base) => (materials(pr)[list].find(m => m.base === base) || { name: base }).name;
+  /* cells to write in the lists sheet; null = clear. Untouched lists are left exactly as the template has them. */
+  function listCells(pr) {
+    const cells = [];
+    const mats = materials(pr);
+    for (const list of MAT_LISTS) {
+      const def = L.lists[list], eff = mats[list].filter(m => txt(m.name));
+      const same = eff.length === def.items.length && eff.every((m, i) => m.name === def.items[i] && (!def.ucol || txt(m.unit) === ((def.units && def.units[i]) || '')));
+      if (same) continue;
+      if (eff.length > L.listRN - L.listR0 + 1) throw new Error(`قائمة «${list}» بها ${eff.length} خامة والقالب يسع ${L.listRN - L.listR0 + 1} فقط. احذف ما لا تحتاجه من شاشة الخامات.`);
+      for (let r = L.listR0; r <= L.listRN; r++) {
+        const m = eff[r - L.listR0];
+        cells.push([def.col + r, m ? txt(m.name) : null]);
+        if (def.ucol) cells.push([def.ucol + r, m && txt(m.unit) ? txt(m.unit) : null]);
+      }
+    }
+    return cells;
   }
 
   // ---------------------------------------------------------------- export
@@ -234,17 +262,7 @@
     for (const k of Object.keys(rows)) {
       rows[k].forEach((row, i) => { for (const [f, v] of Object.entries(row)) { if (!L.cols[k][f]) throw new Error('عمود غير معروف ' + f); put(k, L.cols[k][f] + (L.r0 + i), v); } });
     }
-    const custom = usedCustom(pr);
-    for (const [list, items] of Object.entries(custom)) {
-      const def = L.lists[list];
-      let r = L.listR0 + def.items.length;
-      for (const c of items) {
-        if (r > L.listRN) throw new Error('قائمة الخامات ممتلئة في القالب: ' + list);
-        put('LS', def.col + r, txt(c.name));
-        if (txt(c.unit)) put('LS', def.ucol + r, txt(c.unit));
-        r++;
-      }
-    }
+    for (const [ref, v] of listCells(pr)) (maps.LS = maps.LS || new Map()).set(ref, v);
     for (const [f, ref] of Object.entries(L.pd)) put('PD', ref, f === 'method' ? 'رفع من الطبيعة' : txt(pr[f]));
     // every worksheet goes through patchSheet so cached formula values are cleared everywhere
     const byPath = new Map(Object.entries(maps).map(([k, m]) => [pathOf(L.sheets[k]), m]));
@@ -287,5 +305,5 @@
     return q;
   }
 
-  globalThis.BOQ = { num, txt, buildRows, exportXlsx, quantities, wallRecords, unzip, zip };
+  globalThis.BOQ = { num, txt, buildRows, exportXlsx, quantities, wallRecords, unzip, zip, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap: L.listRN - L.listR0 + 1 };
 })();

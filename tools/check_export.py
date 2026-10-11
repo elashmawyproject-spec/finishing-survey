@@ -26,8 +26,8 @@ if empty_formulas and not any(c.value is not None for c in by_space_probe):
     sys.exit(1)
 
 # expected totals for the made-up project in tools/test_export.js: floor, wall gross/ded/net, linear gross/ded/net
-EXPECT = {'T-01': {4: 17.1, 5: 54.32, 6: 6.58, 7: 47.74, 12: 19.4, 13: 3.5, 14: 15.9},
-          'T-02': {4: 4.35, 5: 24.08, 6: 1.76, 7: 22.32}}
+EXPECT = {'T-01': {4: 17.1, 5: 54.32, 6: 6.58, 7: 47.74, 12: 19.4, 13: 3.5, 14: 15.9, 17: 0},
+          'T-02': {4: 4.35, 5: 24.08, 6: 1.76, 7: 22.32, 17: 0}, 'GF-02': {17: 0}, 'GF-ST-01': {17: 0}}
 wrong = []
 by_space = wb['ملخص الكميات حسب الفراغ']
 heads = [str(c.value).replace('\n', ' ') for c in by_space[3]]

@@ -62,3 +62,9 @@ p.muted { margin: 8px 0 0; }
   .grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* materials screen */
+.mat-r { display: flex; gap: 6px; align-items: center; }
+.mat-r input { flex: 1; min-width: 0; }
+.mat-r select { width: 84px; flex: none; }
+.x.off { display: inline-flex; align-items: center; justify-content: center; background: transparent; }
