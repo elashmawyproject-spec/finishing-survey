@@ -68,3 +68,11 @@ p.muted { margin: 8px 0 0; }
 .mat-r input { flex: 1; min-width: 0; }
 .mat-r select { width: 84px; flex: none; }
 .x.off { display: inline-flex; align-items: center; justify-content: center; background: transparent; }
+
+/* needs-review flag + note under each item */
+.rev { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.rev .chk { flex: none; white-space: nowrap; }
+.rev input[type=text] { flex: 1; min-width: 0; }
+.rev.on { background: #fff4d6; border-radius: 8px; padding: 4px 6px; }
+.chip.rv { background: #fff4d6; color: #8a5a00; }
+.sum .warn { color: #8a5a00; }

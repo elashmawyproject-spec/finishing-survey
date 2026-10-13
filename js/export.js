@@ -109,6 +109,19 @@
   // ---------------------------------------------------------------- model -> rows
   /* plaster height of a space: its own value, else the one set for its floor */
   const plasterH = (pr, sp) => num(sp.plaster && sp.plaster.hgt) ?? num(pr && pr.levels && pr.levels[sp.level] && pr.levels[sp.level].plHgt);
+  /* «يحتاج مراجعة» + site note of one entered item, as workbook columns */
+  const flag = (...items) => {
+    const rev = items.some(x => x && x.rev), note = items.map(x => txt(x && x.note)).filter(Boolean).join(' | ');
+    return { ...(rev ? { rev: YES } : {}), ...(note ? { note } : {}) };
+  };
+  const addNote = (row, extra) => { if (extra) row.note = row.note ? row.note + ' | ' + extra : extra; return row; };
+  function reviewCount(sp) {
+    let n = 0;
+    const c = x => { if (x && x.rev) n++; };
+    (sp.floors || []).forEach(c); ((sp.ceil && sp.ceil.parts) || []).forEach(c);
+    (sp.walls || []).forEach(w => { c(w); (w.ops || []).forEach(c); (w.feats || []).forEach(c); });
+    return n;
+  }
   function wallRecords(sp) {
     /* per wall: finish records grouped by material (one record per wall + material, as the workbook requires) */
     const res = [];
@@ -120,13 +133,13 @@
       const groups = new Map();
       let manual = 0;
       const hasMain = !!mainMat && mainMat !== '-' && len !== null;
-      if (hasMain) groups.set(mainMat, [{ len, hgt: mainH, cnt: null, main: true }]);
+      if (hasMain) groups.set(mainMat, [{ len, hgt: mainH, cnt: null, main: true, src: w }]);
       (w.feats || []).forEach(f => {
         if (f.unit === 'lm') return;
         const fl = num(f.len), fh = num(f.hgt), fm = txt(f.mat);
         if (!fm || fl === null) return;
         if (!groups.has(fm)) groups.set(fm, []);
-        groups.get(fm).push({ len: fl, hgt: fh, cnt: num(f.cnt) });
+        groups.get(fm).push({ len: fl, hgt: fh, cnt: num(f.cnt), src: f });
         if (f.ded !== false && fh !== null) manual += fl * fh * (num(f.cnt) ?? 1);
       });
       res.push({ code, len, mainMat: hasMain ? mainMat : '', groups, manual: hasMain ? manual : 0, wall: w });
@@ -144,14 +157,16 @@
       const parts = (sp.floors || []).filter(f => num(f.dir) !== null || (num(f.len) !== null && num(f.wid) !== null));
       parts.forEach((f, i) => {
         if (!txt(f.mat)) return;
-        R.FL.push({ sp: code, mat: txt(f.mat), desc: txt(f.desc) || 'جزء ' + (i + 1), len: num(f.len), wid: num(f.wid), cnt: num(f.cnt), dir: num(f.dir) });
+        R.FL.push({ sp: code, mat: txt(f.mat), desc: txt(f.desc) || 'جزء ' + (i + 1), len: num(f.len), wid: num(f.wid), cnt: num(f.cnt), dir: num(f.dir), ...flag(f) });
       });
 
       const ce = sp.ceil || {};
       if (!pr.noCeil && txt(ce.mat)) {
         const cparts = ce.same === false ? (ce.parts || []).filter(f => num(f.dir) !== null || (num(f.len) !== null && num(f.wid) !== null)) : parts;
-        cparts.forEach((f, i) => R.CL.push({ sp: code, mat: txt(ce.mat), spec: txt(ce.spec), desc: (txt(f.desc) || 'جزء') + ' ' + (i + 1),
-          len: num(f.len), wid: num(f.wid), cnt: num(f.cnt), dir: num(f.dir), note: num(ce.hgt) !== null ? 'ارتفاع السقف ' + num(ce.hgt) + ' م' : '' }));
+        cparts.forEach((f, i) => R.CL.push(addNote({ sp: code, mat: txt(ce.mat), spec: txt(ce.spec), desc: (txt(f.desc) || 'جزء') + ' ' + (i + 1),
+          len: num(f.len), wid: num(f.wid), cnt: num(f.cnt), dir: num(f.dir), note: num(ce.hgt) !== null ? 'ارتفاع السقف ' + num(ce.hgt) + ' م' : '' },
+          ce.same === false ? flag(f).note : '')));
+        if (ce.same === false) cparts.forEach((f, i) => { if (f.rev) R.CL[R.CL.length - cparts.length + i].rev = YES; });
       }
 
       const recs = wallRecords(sp);
@@ -171,20 +186,22 @@
             if (list.some(x => x.hgt === null)) { row.dir = null; row.len = list[0].len; }
           }
           if (mat === rec.mainMat && rec.manual > 0) { row.man = Math.round(rec.manual * 1e4) / 1e4; row.note = (row.note ? row.note + ' | ' : '') + 'الخصم اليدوي = أجزاء بخامة أخرى على نفس الحائط'; }
-          R.WL.push(row);
+          const fl = flag(...list.map(x => x.src));
+          if (fl.rev) row.rev = YES;
+          R.WL.push(addNote(row, fl.note));
         }
-        if (plOn && rec.len !== null) R.PL.push({ sp: code, wall: rec.code, mat: txt(sp.plaster.mat), len: rec.len, hgt: plasterH(pr, sp) });
+        if (plOn && rec.len !== null) R.PL.push({ sp: code, wall: rec.code, mat: txt(sp.plaster.mat), len: rec.len, hgt: plasterH(pr, sp), ...flag(rec.wall) });
         (rec.wall.ops || []).forEach((o, k) => {
           if (num(o.wid) === null && num(o.hgt) === null) return;
           const isWin = /نافذة|شباك/.test(txt(o.typ));
           R.OP.push({ code: `${code}-${rec.code}-${k + 1}`, sp: code, wall: rec.code, typ: txt(o.typ) || 'باب', wid: num(o.wid), hgt: num(o.hgt), cnt: num(o.cnt),
             dfin: (o.fin !== false && rec.mainMat) ? YES : NO, tgt: (o.fin !== false && rec.mainMat && rec.groups.size > 1) ? rec.mainMat : '',
             dpl: (o.pl !== false && plOn) ? YES : NO,
-            dsk: ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn) ? YES : NO });
+            dsk: ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn) ? YES : NO, ...flag(o) });
         });
         (rec.wall.feats || []).forEach((f, k) => {
           if (f.unit !== 'lm' || !txt(f.mat) || num(f.len) === null) return;
-          R.LN.push({ sp: code, mat: txt(f.mat), desc: `على الحائط ${rec.code} (${k + 1})`, dir: num(f.len), cnt: num(f.cnt) });
+          R.LN.push({ sp: code, mat: txt(f.mat), desc: `على الحائط ${rec.code} (${k + 1})`, dir: num(f.len), cnt: num(f.cnt), ...flag(f) });
         });
       });
       if (skOn && perim > 0) R.LN.push({ sp: code, mat: txt(sp.skirt.mat), desc: 'وزرة — محيط الفراغ', dir: Math.round(perim * 1e4) / 1e4, autoq: YES });
@@ -307,5 +324,5 @@
     return q;
   }
 
-  globalThis.BOQ = { num, txt, buildRows, exportXlsx, quantities, wallRecords, unzip, zip, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap: L.listRN - L.listR0 + 1 };
+  globalThis.BOQ = { num, txt, buildRows, exportXlsx, quantities, wallRecords, reviewCount, unzip, zip, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap: L.listRN - L.listR0 + 1 };
 })();

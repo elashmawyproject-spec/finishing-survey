@@ -1,7 +1,7 @@
 /* Finishing survey app — data stays on this device (localStorage) and is exported as an Excel BOQ workbook. */
 (function () {
   'use strict';
-  const { num, txt, quantities, exportXlsx, buildRows, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap } = globalThis.BOQ;
+  const { num, txt, quantities, exportXlsx, buildRows, reviewCount, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap } = globalThis.BOQ;
   const LISTS = globalThis.BOQ_LAYOUT.lists;
   const SEED = globalThis.BOQ_SEED;
   const KEY = 'boq-survey-v2', OLD_KEY = 'boq-survey-v1';
@@ -100,6 +100,8 @@
     return `<select data-p="${path}" data-list="${Array.isArray(list) ? '' : list}">${o}</select>`;
   }
   const chk = (path, on, label) => `<label class="chk"><input type="checkbox" data-p="${path}"${on ? ' checked' : ''}> ${esc(label)}</label>`;
+  /* «يحتاج مراجعة» + note line shown under every measured item */
+  const revRow = (base, it) => `<div class="rev${it.rev ? ' on' : ''}">${chk(`${base}.rev`, !!it.rev, 'يحتاج مراجعة')}${inp(`${base}.note`, it.note, 'ملاحظة')}</div>`;
   const fld = (label, html, cls) => `<label class="fld ${cls || ''}"><span>${esc(label)}</span>${html}</label>`;
 
   // ------------------------------------------------------------ views
@@ -169,7 +171,7 @@
     P.spaces.forEach((s, i) => {
       if (s.level !== level) return;
       const [t, c] = statusOf(s);
-      h += `<a class="row" href="#/space/${i}"><span><b dir="ltr">${esc(s.code)}</b> <span dir="ltr">${esc(s.name)}</span></span><span class="chip ${c}">${t}</span></a>`;
+      h += `<a class="row" href="#/space/${i}"><span><b dir="ltr">${esc(s.code)}</b> <span dir="ltr">${esc(s.name)}</span></span><span>${reviewCount(s) ? `<span class="chip rv">مراجعة ${reviewCount(s)}</span> ` : ''}<span class="chip ${c}">${t}</span></span></a>`;
     });
     h += `<button class="btn ghost" data-act="addSpace" data-level="${esc(level)}">＋ فراغ جديد في هذا الدور</button></section>`;
     app.innerHTML = h;
@@ -203,7 +205,7 @@
       h += `<div class="item"><div class="item-h"><b>جزء ${i + 1}</b><button class="x" data-act="del" data-arr="${base}" data-i="${i}" aria-label="حذف">✕</button></div>
         <div class="grid2">${withMat ? fld('الخامة', sel(`${base}.${i}.mat`, txt(f.mat), 'FloorMat')) : ''}${fld('الوصف', inp(`${base}.${i}.desc`, f.desc, 'اختياري'))}</div>
         <div class="grid4">${fld('الطول', numInp(`${base}.${i}.len`, f.len))}${fld('العرض', numInp(`${base}.${i}.wid`, f.wid))}
-        ${fld('التكرار', numInp(`${base}.${i}.cnt`, f.cnt, '1'))}${fld('أو مساحة مباشرة', numInp(`${base}.${i}.dir`, f.dir))}</div></div>`;
+        ${fld('التكرار', numInp(`${base}.${i}.cnt`, f.cnt, '1'))}${fld('أو مساحة مباشرة', numInp(`${base}.${i}.dir`, f.dir))}</div>${revRow(`${base}.${i}`, f)}</div>`;
     });
     return h;
   }
@@ -213,7 +215,7 @@
     let h = `<div class="item wall"><div class="item-h"><b>ح${i + 1}</b><button class="x" data-act="del" data-arr="walls" data-i="${i}" aria-label="حذف الحائط">✕</button></div>
       <div class="grid3">${fld('الطول (م)', numInp(`${base}.len`, w.len))}
       ${fld('خامة مختلفة', sel(`${base}.mat`, txt(w.mat), 'WallMat', { blank: 'حسب الفراغ', pre: [['-', 'بدون تشطيب']] }))}
-      ${fld('ارتفاع مختلف', numInp(`${base}.hgt`, w.hgt, 'حسب الفراغ'))}</div>`;
+      ${fld('ارتفاع مختلف', numInp(`${base}.hgt`, w.hgt, 'حسب الفراغ'))}</div>${revRow(base, w)}`;
     (w.ops || []).forEach((o, k) => {
       const ob = `${base}.ops.${k}`;
       const isWin = /نافذة|شباك/.test(txt(o.typ));
@@ -222,7 +224,7 @@
         <div class="grid4">${fld('النوع', sel(`${ob}.typ`, txt(o.typ), 'OpenTypes'))}${fld('العرض', numInp(`${ob}.wid`, o.wid))}
         ${fld('الارتفاع', numInp(`${ob}.hgt`, o.hgt))}${fld('العدد', numInp(`${ob}.cnt`, o.cnt, '1'))}</div>
         <div class="chks"><span class="muted">تُخصم من:</span>${chk(`${ob}.fin`, o.fin !== false, 'التشطيب')}${chk(`${ob}.pl`, o.pl !== false, 'اللياسة')}
-        ${chk(`${ob}.sk`, o.sk === undefined ? skDef : o.sk, 'الوزرة')}</div></div>`;
+        ${chk(`${ob}.sk`, o.sk === undefined ? skDef : o.sk, 'الوزرة')}</div>${revRow(ob, o)}</div>`;
     });
     (w.feats || []).forEach((f, k) => {
       const fb = `${base}.feats.${k}`;
@@ -231,7 +233,7 @@
         <div class="grid2">${fld('القياس', `<select data-p="${fb}.unit" data-rerender="1"><option value="m2"${lm ? '' : ' selected'}>م² (مسطح)</option><option value="lm"${lm ? ' selected' : ''}>م.ط (طولي)</option></select>`)}
         ${fld('الخامة', sel(`${fb}.mat`, txt(f.mat), lm ? 'LinMat' : 'WallMat'))}</div>
         <div class="grid3">${fld('الطول', numInp(`${fb}.len`, f.len))}${lm ? '' : fld('الارتفاع', numInp(`${fb}.hgt`, f.hgt))}${fld('العدد', numInp(`${fb}.cnt`, f.cnt, '1'))}</div>
-        ${lm ? '' : `<div class="chks">${chk(`${fb}.ded`, f.ded !== false, 'يُخصم من تشطيب الحائط الأساسي (لا يوجد تحته)')}</div>`}</div>`;
+        ${lm ? '' : `<div class="chks">${chk(`${fb}.ded`, f.ded !== false, 'يُخصم من تشطيب الحائط الأساسي (لا يوجد تحته)')}</div>`}${revRow(fb, f)}</div>`;
     });
     h += `<div class="acts"><button class="btn sm" data-act="addOp" data-i="${i}">＋ فتحة</button><button class="btn sm" data-act="addFeat" data-i="${i}">＋ جزء بخامة أخرى</button></div></div>`;
     return h;
@@ -246,6 +248,8 @@
     if (q.plGross > 0) h += line('اللياسة: إجمالي − خصم = صافي', `${f2(q.plGross)} − ${f2(q.plDed)} = ${f2(q.plGross - q.plDed)}`);
     if (sp.skirt && sp.skirt.on !== false && q.perim > 0) h += line('الوزرة (م.ط)', `${f2(q.perim)} − ${f2(q.skDed)} = ${f2(q.perim - q.skDed)}`);
     h += line('عدد الفتحات', String(q.openings));
+    const rv = reviewCount(sp);
+    if (rv) h += `<div class="warn"><span>بنود تحتاج مراجعة</span><b>${rv}</b></div>`;
     return h;
   }
 
@@ -339,6 +343,7 @@
     setPath(target, p, val);
     save();
     if (el.dataset.rerender || (el.type === 'checkbox' && /^(ceil\.same|skirt\.underWin)$/.test(p))) { route(true); return; }
+    if (el.type === 'checkbox' && /\.rev$/.test(p)) el.closest('.rev').classList.toggle('on', el.checked);
     const s = document.getElementById('sum');
     if (s && target !== P) s.innerHTML = summaryHtml(target);
     if (target !== P && (p === 'code' || p === 'name')) titleEl.textContent = target.code + ' — ' + target.name;
