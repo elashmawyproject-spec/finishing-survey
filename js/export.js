@@ -107,6 +107,8 @@
   }
 
   // ---------------------------------------------------------------- model -> rows
+  /* plaster height of a space: its own value, else the one set for its floor */
+  const plasterH = (pr, sp) => num(sp.plaster && sp.plaster.hgt) ?? num(pr && pr.levels && pr.levels[sp.level] && pr.levels[sp.level].plHgt);
   function wallRecords(sp) {
     /* per wall: finish records grouped by material (one record per wall + material, as the workbook requires) */
     const res = [];
@@ -146,14 +148,14 @@
       });
 
       const ce = sp.ceil || {};
-      if (txt(ce.mat)) {
+      if (!pr.noCeil && txt(ce.mat)) {
         const cparts = ce.same === false ? (ce.parts || []).filter(f => num(f.dir) !== null || (num(f.len) !== null && num(f.wid) !== null)) : parts;
         cparts.forEach((f, i) => R.CL.push({ sp: code, mat: txt(ce.mat), spec: txt(ce.spec), desc: (txt(f.desc) || 'جزء') + ' ' + (i + 1),
           len: num(f.len), wid: num(f.wid), cnt: num(f.cnt), dir: num(f.dir), note: num(ce.hgt) !== null ? 'ارتفاع السقف ' + num(ce.hgt) + ' م' : '' }));
       }
 
       const recs = wallRecords(sp);
-      const plOn = sp.plaster && sp.plaster.on !== false && txt(sp.plaster.mat) && num(sp.plaster.hgt) !== null;
+      const plOn = sp.plaster && sp.plaster.on !== false && txt(sp.plaster.mat) && plasterH(pr, sp) !== null;
       const skOn = sp.skirt && sp.skirt.on !== false && txt(sp.skirt.mat);
       let perim = 0;
       recs.forEach(rec => {
@@ -171,7 +173,7 @@
           if (mat === rec.mainMat && rec.manual > 0) { row.man = Math.round(rec.manual * 1e4) / 1e4; row.note = (row.note ? row.note + ' | ' : '') + 'الخصم اليدوي = أجزاء بخامة أخرى على نفس الحائط'; }
           R.WL.push(row);
         }
-        if (plOn && rec.len !== null) R.PL.push({ sp: code, wall: rec.code, mat: txt(sp.plaster.mat), len: rec.len, hgt: num(sp.plaster.hgt) });
+        if (plOn && rec.len !== null) R.PL.push({ sp: code, wall: rec.code, mat: txt(sp.plaster.mat), len: rec.len, hgt: plasterH(pr, sp) });
         (rec.wall.ops || []).forEach((o, k) => {
           if (num(o.wid) === null && num(o.hgt) === null) return;
           const isWin = /نافذة|شباك/.test(txt(o.typ));
@@ -280,17 +282,17 @@
   }
 
   // ---------------------------------------------------------------- quick quantities for the on-screen summary
-  function quantities(sp) {
+  function quantities(sp, pr) {
     const q = { floor: 0, wallGross: 0, wallDed: 0, plGross: 0, plDed: 0, perim: 0, skDed: 0, openings: 0 };
     (sp.floors || []).forEach(f => { const c = num(f.cnt) ?? 1; q.floor += num(f.dir) !== null ? num(f.dir) * c : (num(f.len) ?? 0) * (num(f.wid) ?? 0) * c; });
-    const plOn = sp.plaster && sp.plaster.on !== false && num(sp.plaster.hgt) !== null;
+    const plOn = sp.plaster && sp.plaster.on !== false && plasterH(pr, sp) !== null;
     const skOn = sp.skirt && sp.skirt.on !== false;
     wallRecords(sp).forEach(rec => {
       if (rec.len === null) return;
       q.perim += rec.len;
       const main = rec.mainMat ? rec.groups.get(rec.mainMat)[0] : null;
       if (main && main.hgt !== null) { q.wallGross += main.len * main.hgt; q.wallDed += rec.manual; }
-      if (plOn) q.plGross += rec.len * num(sp.plaster.hgt);
+      if (plOn) q.plGross += rec.len * plasterH(pr, sp);
       (rec.wall.ops || []).forEach(o => {
         const w = num(o.wid), h = num(o.hgt), c = num(o.cnt) ?? 1;
         if (w === null) return;

@@ -8,17 +8,18 @@ const win = { typ: 'نافذة', wid: '0.80', hgt: '1.50', cnt: '2' };
 // invented measurements only: this repository is public, never paste real site data here
 const project = {
   name: 'Test Project', location: 'موقع تجريبي', surveyor: 'اختبار', date: '2026-10-11',
+  levels: { 'ثاني': { plHgt: '3' } },   // floor-wide plaster height: T-01 inherits it, T-02 overrides with its own
   custom: { WallMat: [{ name: 'كسوة ألمنيوم', unit: 'م²' }] },
   spaces: [
     { code: 'T-01', name: 'ROOM A', level: 'ثاني', kind: 'room',
       floors: [{ mat: 'سيراميك أرضيات', len: '4.2', wid: '3.5' }, { mat: 'سيراميك أرضيات', len: '1.2', wid: '2' }],
-      ceil: { mat: 'سقف جبسي', hgt: '2.8' }, wall: { mat: 'دهانات', hgt: '2.8' }, plaster: { on: true, mat: 'لياسة أسمنتية — حوائط داخلية', hgt: '3' },
+      ceil: { mat: 'سقف جبسي', hgt: '2.8' }, wall: { mat: 'دهانات', hgt: '2.8' }, plaster: { on: true, mat: 'لياسة أسمنتية — حوائط داخلية', hgt: '' },
       skirt: { on: true, mat: 'وزرات سيراميك', underWin: false },
       walls: [{ len: '4.2', ops: [win] }, { len: '3.5' }, { len: '3', ops: [{ typ: 'باب', wid: '0.9', hgt: '2.2' }] }, { len: '5.5' },
               { len: '1.2', ops: [{ typ: 'باب', wid: '1', hgt: '2.2' }] }, { len: '2' }] },
     { code: 'T-02', name: 'BATH A', level: 'ثاني', kind: 'room',
       floors: [{ mat: 'سيراميك أرضيات', len: '1.5', wid: '1.8' }, { mat: 'رخام', len: '1.5', wid: '0.1' }, { mat: 'موزايكو', len: '1', wid: '1.5' }],
-      wall: { mat: 'سيراميك حوائط الحمامات', hgt: '2.8' }, plaster: { on: true, mat: 'لياسة أسمنتية — حوائط داخلية', hgt: '3' }, skirt: { on: false },
+      wall: { mat: 'سيراميك حوائط الحمامات', hgt: '2.8' }, plaster: { on: true, mat: 'لياسة أسمنتية — حوائط داخلية', hgt: '3.1' }, skirt: { on: false },
       walls: [{ len: '8.6', ops: [{ typ: 'باب', wid: '0.8', hgt: '2.2' }] }] },
     // features: marble panel (m2, deducted from paint) + marble strip (lm) + stainless + a window with skirting under it
     { code: 'GF-02', name: 'MAIN SALON', level: 'أرضي', kind: 'room',
@@ -48,6 +49,7 @@ function editedLists() {
   p.mats.FloorMat.push({ name: 'بلاط أسمنتي 20×20', unit: 'م²' });
   p.mats.OpenTypes.push({ name: 'شباك مغلق' });
   p.mats.CeilMat.find(m => m.name === 'بلاطات معلقة').unit = 'عدد';
+  p.noCeil = true;   // ceilings not required: no ceiling rows at all
   return p;
 }
 (async () => {

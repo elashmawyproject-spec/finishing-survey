@@ -23,7 +23,7 @@
   function setCur(id) {
     P = DB.projects.find(p => p.id === id) || null;
     DB.cur = P ? P.id : null;
-    if (P) { P.custom = P.custom || {}; P.spaces = P.spaces || []; P.mats = materials(P); }
+    if (P) { P.custom = P.custom || {}; P.spaces = P.spaces || []; P.levels = P.levels || {}; P.mats = materials(P); }
   }
   setCur(DB.cur);
   let saveTimer = null;
@@ -81,7 +81,7 @@
   }
   const matUses = (list, name) => matRefs(list).filter(([o, k]) => txt(o[k]) === name).length;
   function hasData(sp) {
-    const q = quantities(sp);
+    const q = quantities(sp, P);
     return q.floor > 0 || q.perim > 0 || (sp.kind === 'stair' && num(sp.stair && sp.stair.steps) > 0);
   }
   const statusOf = sp => sp.done ? ['تم', 'ok'] : hasData(sp) ? ['جارٍ', 'mid'] : ['لم يبدأ', 'none'];
@@ -130,7 +130,8 @@
       ${fld('اسم المشروع', inp('@name', P.name))}${fld('المالك / العميل', inp('@owner', P.owner))}
       ${fld('الموقع', inp('@location', P.location))}${fld('القائم بالحصر', inp('@surveyor', P.surveyor))}
       ${fld('تاريخ الحصر', `<input type="date" data-p="@date" value="${esc(P.date)}">`)}</div>
-      ${fld('ملاحظات عامة', `<textarea data-p="@notes" rows="2">${esc(P.notes)}</textarea>`, 'mt')}</details>
+      ${fld('ملاحظات عامة', `<textarea data-p="@notes" rows="2">${esc(P.notes)}</textarea>`, 'mt')}
+      <div class="chks">${chk('@noCeil', !!P.noCeil, 'الأسقف غير مطلوبة في هذا المشروع')}</div></details>
       <section class="card"><h2>الأدوار والفراغات</h2>
       <div class="prog"><div style="width:${total ? Math.round(done / total * 100) : 0}%"></div></div>
       <p class="muted">تم ${done} من ${total} فراغًا${mid ? ` · جارٍ ${mid}` : ''}</p>`;
@@ -163,7 +164,8 @@
   function viewFloor(level) {
     titleEl.textContent = 'الدور: ' + level;
     backEl.hidden = false; backEl.href = '#/p';
-    let h = '<section class="card">';
+    let h = `<section class="card"><div class="grid2">${fld('ارتفاع اللياسة الموحد للدور (م)', numInp(`@levels.${level}.plHgt`, (P.levels[level] || {}).plHgt))}</div>
+      <p class="muted">يُطبَّق على كل فراغ في هذا الدور لم يُكتب له ارتفاع لياسة خاص.</p></section><section class="card">`;
     P.spaces.forEach((s, i) => {
       if (s.level !== level) return;
       const [t, c] = statusOf(s);
@@ -236,7 +238,7 @@
   }
 
   function summaryHtml(sp) {
-    const q = quantities(sp);
+    const q = quantities(sp, P);
     const line = (a, b) => `<div><span>${a}</span><b dir="ltr">${b}</b></div>`;
     let h = line('الأرضية (م²)', f2(q.floor));
     h += line('محيط الحوائط (م)', f2(q.perim));
@@ -255,6 +257,7 @@
     sp.floors = sp.floors || []; sp.walls = sp.walls || []; sp.ceil = sp.ceil || { same: true }; sp.wall = sp.wall || {};
     sp.plaster = sp.plaster || { on: true }; sp.skirt = sp.skirt || { on: true }; sp.corners = sp.corners || {}; sp.stair = sp.stair || {};
     const stair = sp.kind === 'stair';
+    const lvlPl = txt((P.levels[sp.level] || {}).plHgt);
     let h = `<details class="card"><summary>بيانات الفراغ</summary><div class="grid2">
       ${fld('الكود', inp('code', sp.code, '', 'ltr'))}${fld('الاسم', inp('name', sp.name, '', 'ltr'))}
       ${fld('الدور', sel('level', sp.level, LEVELS))}${fld('النوع', `<select data-p="kind" data-rerender="1"><option value="room"${stair ? '' : ' selected'}>غرفة / فراغ</option><option value="stair"${stair ? ' selected' : ''}>سلم</option></select>`)}
@@ -272,7 +275,7 @@
       <button class="btn sm" data-act="addFloor">＋ جزء / خامة أخرى</button>
       <div class="grid2 mt">${fld('فاصل ستانلس بالأرضية (م.ط)', numInp('floorStrip', sp.floorStrip))}</div></section>`;
 
-    h += `<section class="card"><h2>السقف</h2><div class="grid2">${fld('نوع السقف', sel('ceil.mat', txt(sp.ceil.mat), 'CeilMat', { blank: 'لا يُحصر' }))}
+    if (!P.noCeil) h += `<section class="card"><h2>السقف</h2><div class="grid2">${fld('نوع السقف', sel('ceil.mat', txt(sp.ceil.mat), 'CeilMat', { blank: 'لا يُحصر' }))}
       ${fld('ارتفاعه من الأرض', numInp('ceil.hgt', sp.ceil.hgt))}</div>
       <div class="chks">${chk('ceil.same', sp.ceil.same !== false, 'نفس أبعاد الأرضية')}</div>
       ${sp.ceil.same === false ? partRows('ceil.parts', sp.ceil.parts || [], false) + '<button class="btn sm" data-act="addCeil">＋ جزء</button>' : ''}</section>`;
@@ -281,7 +284,7 @@
       ${P.spaces.some((s, k) => k !== i && txt(s.wall && s.wall.mat)) && !txt(sp.wall.mat) ? '<button class="btn sm ghost" data-act="copyLast">نسخ إعدادات التشطيب من آخر فراغ</button>' : ''}
       <div class="grid2">${fld('خامة التشطيب', sel('wall.mat', txt(sp.wall.mat), 'WallMat'))}${fld('ارتفاع التشطيب', numInp('wall.hgt', sp.wall.hgt))}</div>
       <div class="chks">${chk('plaster.on', sp.plaster.on !== false, 'توجد لياسة')}</div>
-      <div class="grid2">${fld('نوع اللياسة', sel('plaster.mat', txt(sp.plaster.mat), 'PlMat'))}${fld('ارتفاع اللياسة', numInp('plaster.hgt', sp.plaster.hgt))}</div>
+      <div class="grid2">${fld('نوع اللياسة', sel('plaster.mat', txt(sp.plaster.mat), 'PlMat'))}${fld(lvlPl ? 'ارتفاع اللياسة (استثناء)' : 'ارتفاع اللياسة', numInp('plaster.hgt', sp.plaster.hgt, lvlPl ? 'حسب الدور: ' + lvlPl : ''))}</div>
       <div class="chks">${chk('skirt.on', sp.skirt.on !== false, 'توجد وزرة')}${chk('skirt.underWin', !!sp.skirt.underWin, 'الوزرة موجودة أسفل النوافذ')}</div>
       <div class="grid2">${fld('خامة الوزرة', sel('skirt.mat', txt(sp.skirt.mat), 'LinMat'))}</div></section>`;
 
