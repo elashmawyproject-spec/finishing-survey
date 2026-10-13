@@ -1,7 +1,7 @@
 /* Finishing survey app — data stays on this device (localStorage) and is exported as an Excel BOQ workbook. */
 (function () {
   'use strict';
-  const { num, txt, quantities, exportXlsx, buildRows, reviewCount, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap } = globalThis.BOQ;
+  const { num, txt, calc, quantities, exportXlsx, buildRows, reviewCount, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap } = globalThis.BOQ;
   const LISTS = globalThis.BOQ_LAYOUT.lists;
   const SEED = globalThis.BOQ_SEED;
   const KEY = 'boq-survey-v2', OLD_KEY = 'boq-survey-v1';
@@ -64,7 +64,7 @@
       if (list === 'CeilMat') add(sp.ceil, 'mat');
       if (list === 'PlMat') add(sp.plaster, 'mat');
       if (list === 'WallMat') add(sp.wall, 'mat');
-      if (list === 'LinMat') { add(sp.skirt, 'mat'); add(sp, 'floorStripMat'); }
+      if (list === 'LinMat') { add(sp.skirt, 'mat'); add(sp, 'floorStripMat'); (sp.extras || []).forEach(x => add(x, 'mat')); }
       (sp.walls || []).forEach(w => {
         if (list === 'WallMat') add(w, 'mat');
         if (list === 'OpenTypes') (w.ops || []).forEach(o => add(o, 'typ'));
@@ -82,7 +82,7 @@
   const matUses = (list, name) => matRefs(list).filter(([o, k]) => txt(o[k]) === name).length;
   function hasData(sp) {
     const q = quantities(sp, P);
-    return q.floor > 0 || q.perim > 0 || (sp.kind === 'stair' && num(sp.stair && sp.stair.steps) > 0);
+    return q.floor > 0 || q.perim > 0 || (sp.extras || []).some(x => calc(x.qty) !== null) || (sp.kind === 'stair' && num(sp.stair && sp.stair.steps) > 0);
   }
   const statusOf = sp => sp.done ? ['تم', 'ok'] : hasData(sp) ? ['جارٍ', 'mid'] : ['لم يبدأ', 'none'];
 
@@ -215,7 +215,8 @@
     let h = `<div class="item wall"><div class="item-h"><b>ح${i + 1}</b><button class="x" data-act="del" data-arr="walls" data-i="${i}" aria-label="حذف الحائط">✕</button></div>
       <div class="grid3">${fld('الطول (م)', numInp(`${base}.len`, w.len))}
       ${fld('خامة مختلفة', sel(`${base}.mat`, txt(w.mat), 'WallMat', { blank: 'حسب الفراغ', pre: [['-', 'بدون تشطيب']] }))}
-      ${fld('ارتفاع مختلف', numInp(`${base}.hgt`, w.hgt, 'حسب الفراغ'))}</div>${revRow(base, w)}`;
+      ${fld('ارتفاع مختلف', numInp(`${base}.hgt`, w.hgt, 'حسب الفراغ'))}</div>
+      ${sp.skirt && sp.skirt.on !== false ? `<div class="chks">${chk(`${base}.noSk`, !!w.noSk, 'بدون وزرة على هذا الحائط')}</div>` : ''}${revRow(base, w)}`;
     (w.ops || []).forEach((o, k) => {
       const ob = `${base}.ops.${k}`;
       const isWin = /نافذة|شباك/.test(txt(o.typ));
@@ -239,6 +240,20 @@
     return h;
   }
 
+  const unitOf = name => ((P.mats.LinMat.find(m => m.name === name) || {}).unit) || 'م.ط';
+  function extraResult(x) {
+    if (!txt(x.qty)) return '';
+    const q = calc(x.qty);
+    return q === null ? '<span class="bad">الكمية غير مفهومة</span>' : `= ${f2(q * (num(x.cnt) ?? 1))} ${esc(unitOf(txt(x.mat)))}`;
+  }
+  function extraCard(x, k) {
+    const b = `extras.${k}`;
+    return `<div class="item"><div class="item-h"><b>بند ${k + 1}</b><button class="x" data-act="del" data-arr="extras" data-i="${k}" aria-label="حذف">✕</button></div>
+      <div class="grid2">${fld('البند', sel(`${b}.mat`, txt(x.mat), 'LinMat').replace('<select ', '<select data-rerender="1" '))}${fld('الوصف / الموضع', inp(`${b}.desc`, x.desc, 'مثال: حلق باب الشاور'))}</div>
+      <div class="grid2">${fld(`الكمية (${unitOf(txt(x.mat))})`, `<input type="text" data-p="${b}.qty" value="${esc(x.qty)}" placeholder="رقم أو معادلة" class="ltr" autocomplete="off">`)}${fld('التكرار', numInp(`${b}.cnt`, x.cnt, '1'))}</div>
+      <div class="calc" data-calc="${k}">${extraResult(x)}</div>${revRow(b, x)}</div>`;
+  }
+
   function summaryHtml(sp) {
     const q = quantities(sp, P);
     const line = (a, b) => `<div><span>${a}</span><b dir="ltr">${b}</b></div>`;
@@ -246,8 +261,10 @@
     h += line('محيط الحوائط (م)', f2(q.perim));
     h += line('تشطيب الحوائط: إجمالي − خصم = صافي', `${f2(q.wallGross)} − ${f2(q.wallDed)} = ${f2(q.wallGross - q.wallDed)}`);
     if (q.plGross > 0) h += line('اللياسة: إجمالي − خصم = صافي', `${f2(q.plGross)} − ${f2(q.plDed)} = ${f2(q.plGross - q.plDed)}`);
-    if (sp.skirt && sp.skirt.on !== false && q.perim > 0) h += line('الوزرة (م.ط)', `${f2(q.perim)} − ${f2(q.skDed)} = ${f2(q.perim - q.skDed)}`);
+    if (sp.skirt && sp.skirt.on !== false && q.perim > 0) h += line('الوزرة (م.ط)', `${f2(q.skLen)} − ${f2(q.skDed)} = ${f2(q.skLen - q.skDed)}`);
     h += line('عدد الفتحات', String(q.openings));
+    const ex = (sp.extras || []).filter(x => txt(x.mat) && calc(x.qty) !== null).length;
+    if (ex) h += line('بنود إضافية', String(ex));
     const rv = reviewCount(sp);
     if (rv) h += `<div class="warn"><span>بنود تحتاج مراجعة</span><b>${rv}</b></div>`;
     return h;
@@ -259,7 +276,7 @@
     titleEl.textContent = sp.code + ' — ' + sp.name;
     backEl.hidden = false; backEl.href = '#/floor/' + encodeURIComponent(sp.level);
     sp.floors = sp.floors || []; sp.walls = sp.walls || []; sp.ceil = sp.ceil || { same: true }; sp.wall = sp.wall || {};
-    sp.plaster = sp.plaster || { on: true }; sp.skirt = sp.skirt || { on: true }; sp.corners = sp.corners || {}; sp.stair = sp.stair || {};
+    sp.plaster = sp.plaster || { on: true }; sp.skirt = sp.skirt || { on: true }; sp.corners = sp.corners || {}; sp.stair = sp.stair || {}; sp.extras = sp.extras || [];
     const stair = sp.kind === 'stair';
     const lvlPl = txt((P.levels[sp.level] || {}).plHgt);
     let h = `<details class="card"><summary>بيانات الفراغ</summary><div class="grid2">
@@ -272,7 +289,9 @@
         ${fld('عدد الدرجات', numInp('stair.steps', sp.stair.steps))}${fld('عرض الدرجة', numInp('stair.width', sp.stair.width))}
         ${fld('النائمة', numInp('stair.tread', sp.stair.tread))}${fld('القائمة', numInp('stair.riser', sp.stair.riser))}</div>
         <div class="grid2">${fld('خامة الدرج', inp('stair.mat', sp.stair.mat, 'رخام / جرانيت …'))}${fld('وزرة الدرج (م.ط)', numInp('stair.skirtLen', sp.stair.skirtLen))}</div>
-        <p class="muted">النوائم والقوائم تُحسب: عرض الدرجة × عدد الدرجات (م.ط). البسطات تُدخل في الأرضية.</p></section>`;
+        <div class="grid2">${fld('رقم السلم (يجمع قلباته في تقرير السلالم)', inp('stair.group', sp.stair.group, 'ST-01', 'ltr'))}</div>
+        <div class="chks">${chk('stair.fullWalls', !!sp.stair.fullWalls, 'حوائط بيت السلم مسجلة هنا بكامل ارتفاع المبنى (أول قلبة من تحت)')}</div>
+        <p class="muted">النوائم والقوائم تُحسب: عرض الدرجة × عدد الدرجات (م.ط). البسطات تُدخل في الأرضية. حوائط بيت السلم تُسجَّل مرة واحدة على أول قلبة بارتفاعها الكامل وعليها فتحات كل الأدوار.</p></section>`;
     }
 
     h += `<section class="card"><h2>${stair ? 'البسطات (أرضية)' : 'الأرضية'}</h2>${partRows('floors', sp.floors, true)}
@@ -295,6 +314,11 @@
     h += `<section class="card"><h2>الحوائط والفتحات</h2>${sp.walls.map((w, k) => wallCard(sp, w, k)).join('')}
       <button class="btn" data-act="addWall">＋ حائط</button>
       <div class="grid2 mt">${fld('زوايا ستانلس: العدد', numInp('corners.cnt', sp.corners.cnt))}${fld('ارتفاع الزاوية', numInp('corners.hgt', sp.corners.hgt))}</div></section>`;
+
+    h += `<section class="card"><h2>بنود إضافية</h2>
+      <p class="muted">أي بند بوحدته (م.ط / م² / عدد): رخام حلق باب، فواصل، بنود بالعدد… الكمية تقبل رقمًا أو معادلة مثل (0.70 + 2.52 + 2.52) × 3</p>
+      ${sp.extras.map((x, k) => extraCard(x, k)).join('')}
+      <button class="btn sm" data-act="addExtra">＋ بند إضافي</button></section>`;
 
     h += `<section class="card"><h2>ملاحظات</h2><textarea data-p="note" rows="3">${esc(sp.note)}</textarea></section>
       <section class="card sum"><h2>ملخص الفراغ</h2><div id="sum">${summaryHtml(sp)}</div></section>
@@ -344,6 +368,8 @@
     save();
     if (el.dataset.rerender || (el.type === 'checkbox' && /^(ceil\.same|skirt\.underWin)$/.test(p))) { route(true); return; }
     if (el.type === 'checkbox' && /\.rev$/.test(p)) el.closest('.rev').classList.toggle('on', el.checked);
+    const em = p.match(/^extras\.(\d+)\.(qty|cnt)$/);
+    if (em) { const c = app.querySelector(`[data-calc="${em[1]}"]`); if (c) c.innerHTML = extraResult(target.extras[em[1]]); }
     const s = document.getElementById('sum');
     if (s && target !== P) s.innerHTML = summaryHtml(target);
     if (target !== P && (p === 'code' || p === 'name')) titleEl.textContent = target.code + ' — ' + target.name;
@@ -393,6 +419,7 @@
     addFloor: sp => sp.floors.push({ mat: txt((sp.floors[sp.floors.length - 1] || {}).mat) }),
     addCeil: sp => { sp.ceil.parts = sp.ceil.parts || []; sp.ceil.parts.push({}); },
     addWall: sp => sp.walls.push({ len: '', ops: [], feats: [] }),
+    addExtra: sp => sp.extras.push({ mat: '', qty: '', cnt: '', desc: '' }),
     addOp: (sp, d) => { const w = sp.walls[d.i]; w.ops = w.ops || []; w.ops.push({ typ: 'باب', wid: '', hgt: '', cnt: '' }); },
     addFeat: (sp, d) => { const w = sp.walls[d.i]; w.feats = w.feats || []; w.feats.push({ unit: 'm2', mat: '', len: '', hgt: '', cnt: '', ded: true }); },
     del: (sp, d) => {

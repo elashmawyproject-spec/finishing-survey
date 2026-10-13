@@ -15,6 +15,25 @@
     return isFinite(n) ? n : null;
   }
   const txt = v => (v === null || v === undefined) ? '' : String(v).trim();
+  /* quantity typed as a number or as a sum such as (0.70 + 2.52 + 2.52) × 3 — no eval, digits and + - × / ( ) only */
+  function calc(v) {
+    let s = txt(v);
+    if (!s) return null;
+    s = s.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[٫,،]/g, '.').replace(/[×xX]/g, '*').replace(/÷/g, '/').replace(/\s/g, '');
+    if (!/^[0-9.+\-*/()]+$/.test(s)) return null;
+    let i = 0;
+    const fac = () => {
+      if (s[i] === '(') { i++; const v = expr(); if (s[i] !== ')') throw 0; i++; return v; }
+      if (s[i] === '-') { i++; return -fac(); }
+      const m = /^(\d+\.?\d*|\.\d+)/.exec(s.slice(i));
+      if (!m) throw 0;
+      i += m[0].length; return Number(m[0]);
+    };
+    const term = () => { let v = fac(); while (s[i] === '*' || s[i] === '/') { const op = s[i++], t = fac(); v = op === '*' ? v * t : v / t; } return v; };
+    const expr = () => { let v = term(); while (s[i] === '+' || s[i] === '-') { const op = s[i++], t = term(); v = op === '+' ? v + t : v - t; } return v; };
+    try { const r = expr(); return i === s.length && isFinite(r) ? Math.round(r * 1e4) / 1e4 : null; } catch (e) { return null; }
+  }
+  const isFormula = v => /[+*/()×xX÷]|.-/.test(txt(v));
 
   // ---------------------------------------------------------------- zip (deflate via the platform streams)
   const CRC = (() => {
@@ -120,6 +139,7 @@
     const c = x => { if (x && x.rev) n++; };
     (sp.floors || []).forEach(c); ((sp.ceil && sp.ceil.parts) || []).forEach(c);
     (sp.walls || []).forEach(w => { c(w); (w.ops || []).forEach(c); (w.feats || []).forEach(c); });
+    (sp.extras || []).forEach(c);
     return n;
   }
   function wallRecords(sp) {
@@ -174,7 +194,7 @@
       const skOn = sp.skirt && sp.skirt.on !== false && txt(sp.skirt.mat);
       let perim = 0;
       recs.forEach(rec => {
-        if (rec.len !== null) perim += rec.len;
+        if (rec.len !== null && !rec.wall.noSk) perim += rec.len;
         for (const [mat, list] of rec.groups) {
           const row = { sp: code, wall: rec.code, mat };
           if (list.length === 1 && list[0].hgt !== null) {
@@ -188,7 +208,7 @@
           if (mat === rec.mainMat && rec.manual > 0) { row.man = Math.round(rec.manual * 1e4) / 1e4; row.note = (row.note ? row.note + ' | ' : '') + 'الخصم اليدوي = أجزاء بخامة أخرى على نفس الحائط'; }
           const fl = flag(...list.map(x => x.src));
           if (fl.rev) row.rev = YES;
-          R.WL.push(addNote(row, fl.note));
+          R.WL.push(addNote(addNote(row, fl.note), sp.kind === 'stair' && sp.stair && sp.stair.fullWalls ? 'حائط بيت السلم بكامل ارتفاع المبنى' : ''));
         }
         if (plOn && rec.len !== null) R.PL.push({ sp: code, wall: rec.code, mat: txt(sp.plaster.mat), len: rec.len, hgt: plasterH(pr, sp), ...flag(rec.wall) });
         (rec.wall.ops || []).forEach((o, k) => {
@@ -197,15 +217,21 @@
           R.OP.push({ code: `${code}-${rec.code}-${k + 1}`, sp: code, wall: rec.code, typ: txt(o.typ) || 'باب', wid: num(o.wid), hgt: num(o.hgt), cnt: num(o.cnt),
             dfin: (o.fin !== false && rec.mainMat) ? YES : NO, tgt: (o.fin !== false && rec.mainMat && rec.groups.size > 1) ? rec.mainMat : '',
             dpl: (o.pl !== false && plOn) ? YES : NO,
-            dsk: ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn) ? YES : NO, ...flag(o) });
+            dsk: ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn && !rec.wall.noSk) ? YES : NO, ...flag(o) });
         });
         (rec.wall.feats || []).forEach((f, k) => {
           if (f.unit !== 'lm' || !txt(f.mat) || num(f.len) === null) return;
           R.LN.push({ sp: code, mat: txt(f.mat), desc: `على الحائط ${rec.code} (${k + 1})`, dir: num(f.len), cnt: num(f.cnt), ...flag(f) });
         });
       });
-      if (skOn && perim > 0) R.LN.push({ sp: code, mat: txt(sp.skirt.mat), desc: 'وزرة — محيط الفراغ', dir: Math.round(perim * 1e4) / 1e4, autoq: YES });
+      if (skOn && perim > 0) R.LN.push({ sp: code, mat: txt(sp.skirt.mat), desc: (sp.walls || []).some(w => w.noSk) ? 'وزرة — الحوائط المحددة فقط' : 'وزرة — محيط الفراغ', dir: Math.round(perim * 1e4) / 1e4, autoq: YES });
       if (num(sp.floorStrip) > 0) R.LN.push({ sp: code, mat: txt(sp.floorStripMat) || matName(pr, 'LinMat', 'شرائح ستانلس ستيل'), desc: 'فاصل بين خامات الأرضية', dir: num(sp.floorStrip) });
+      (sp.extras || []).forEach((x, i) => {
+        const q = calc(x.qty);
+        if (!txt(x.mat) || q === null) return;
+        const d = (txt(x.desc) || 'بند إضافي') + ` (${i + 1})` + (isFormula(x.qty) ? ' = ' + txt(x.qty) : '');
+        R.LN.push({ sp: code, mat: txt(x.mat), desc: d, dir: q, cnt: num(x.cnt), ...flag(x) });
+      });
       const co = sp.corners || {};
       if (num(co.cnt) > 0 && num(co.hgt) > 0) R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'زوايا ستانلس للحوائط'), desc: 'زوايا الحوائط', dir: num(co.hgt), cnt: num(co.cnt) });
       const st = sp.stair || {};
@@ -300,13 +326,14 @@
 
   // ---------------------------------------------------------------- quick quantities for the on-screen summary
   function quantities(sp, pr) {
-    const q = { floor: 0, wallGross: 0, wallDed: 0, plGross: 0, plDed: 0, perim: 0, skDed: 0, openings: 0 };
+    const q = { floor: 0, wallGross: 0, wallDed: 0, plGross: 0, plDed: 0, perim: 0, skLen: 0, skDed: 0, openings: 0 };
     (sp.floors || []).forEach(f => { const c = num(f.cnt) ?? 1; q.floor += num(f.dir) !== null ? num(f.dir) * c : (num(f.len) ?? 0) * (num(f.wid) ?? 0) * c; });
     const plOn = sp.plaster && sp.plaster.on !== false && plasterH(pr, sp) !== null;
     const skOn = sp.skirt && sp.skirt.on !== false;
     wallRecords(sp).forEach(rec => {
       if (rec.len === null) return;
       q.perim += rec.len;
+      if (!rec.wall.noSk) q.skLen += rec.len;
       const main = rec.mainMat ? rec.groups.get(rec.mainMat)[0] : null;
       if (main && main.hgt !== null) { q.wallGross += main.len * main.hgt; q.wallDed += rec.manual; }
       if (plOn) q.plGross += rec.len * plasterH(pr, sp);
@@ -318,11 +345,11 @@
         const isWin = /نافذة|شباك/.test(txt(o.typ));
         if (o.fin !== false && main) q.wallDed += a;
         if (o.pl !== false && plOn) q.plDed += a;
-        if ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn) q.skDed += w * c;
+        if ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn && !rec.wall.noSk) q.skDed += w * c;
       });
     });
     return q;
   }
 
-  globalThis.BOQ = { num, txt, buildRows, exportXlsx, quantities, wallRecords, reviewCount, unzip, zip, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap: L.listRN - L.listR0 + 1 };
+  globalThis.BOQ = { num, txt, calc, buildRows, exportXlsx, quantities, wallRecords, reviewCount, unzip, zip, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap: L.listRN - L.listR0 + 1 };
 })();

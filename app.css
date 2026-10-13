@@ -76,3 +76,7 @@ p.muted { margin: 8px 0 0; }
 .rev.on { background: #fff4d6; border-radius: 8px; padding: 4px 6px; }
 .chip.rv { background: #fff4d6; color: #8a5a00; }
 .sum .warn { color: #8a5a00; }
+
+/* extra items */
+.calc { font-weight: 700; margin-top: 6px; min-height: 1.2em; direction: rtl; }
+.calc .bad { color: var(--danger); font-weight: 400; }
