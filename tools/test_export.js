@@ -4,6 +4,7 @@ const app = process.argv[2];
 require(path.join(app, 'js', 'layout.js'));
 require(path.join(app, 'js', 'template.js'));
 require(path.join(app, 'js', 'export.js'));
+require(path.join(app, 'js', 'report.js'));
 const win = { typ: 'نافذة', wid: '0.80', hgt: '1.50', cnt: '2' };
 // invented measurements only: this repository is public, never paste real site data here
 const project = {
@@ -20,7 +21,7 @@ const project = {
     { code: 'T-02', name: 'BATH A', level: 'ثاني', kind: 'room',
       floors: [{ mat: 'سيراميك أرضيات', len: '1.5', wid: '1.8' }, { mat: 'رخام', len: '1.5', wid: '0.1' }, { mat: 'موزايكو', len: '1', wid: '1.5' }],
       wall: { mat: 'سيراميك حوائط الحمامات', hgt: '2.8' }, plaster: { on: true, mat: 'لياسة أسمنتية — حوائط داخلية', hgt: '3.1' }, skirt: { on: false },
-      walls: [{ len: '8.6', ops: [{ typ: 'باب', wid: '0.8', hgt: '2.2' }] }] },
+      walls: [{ len: '8.6', ops: [{ typ: 'باب', wid: '0.8', hgt: '2.2', plHgt: '3.1' }] }] },   // opening cut through plaster to full height
     // features: marble panel (m2, deducted from paint) + marble strip (lm) + stainless + a window with skirting under it
     { code: 'GF-02', name: 'MAIN SALON', level: 'أرضي', kind: 'room',
       floors: [{ mat: 'رخام', dir: '40', note: 'مساحة من اللوحة' }], floorStrip: '3.2',
@@ -58,6 +59,7 @@ function editedLists() {
   for (const [file, pr] of [[out, project], [out.replace(/\.xlsx$/, '') + '_lists.xlsx', editedLists()]]) {
     const r = await globalThis.BOQ.exportXlsx(pr);
     fs.writeFileSync(file, Buffer.from(r.bytes));
+    fs.writeFileSync(file.replace(/\.xlsx$/, '.report.json'), JSON.stringify(globalThis.BOQ_REPORT.bySpace(pr)));   // what the in-app report shows
     console.log('written', path.basename(file), r.bytes.length, JSON.stringify(r.counts));
   }
 })().catch(e => { console.error(e); process.exit(1); });

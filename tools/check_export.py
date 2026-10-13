@@ -27,7 +27,7 @@ if empty_formulas and not any(c.value is not None for c in by_space_probe):
 
 # expected totals for the made-up project in tools/test_export.js: floor, wall gross/ded/net, plaster gross, linear gross/ded/net
 EXPECT = {'T-01': {4: 17.1, 5: 54.32, 6: 6.58, 7: 47.74, 9: 58.2, 12: 19.4, 13: 3.5, 14: 15.9, 17: 0},
-          'T-02': {4: 4.35, 5: 24.08, 6: 1.76, 7: 22.32, 9: 26.66, 17: 0}, 'GF-02': {12: 49.42, 13: 1, 15: 6, 17: 3}, 'GF-ST-01': {17: 0}}
+          'T-02': {4: 4.35, 5: 24.08, 6: 1.76, 7: 22.32, 9: 26.66, 10: 2.48, 17: 0}, 'GF-02': {12: 49.42, 13: 1, 15: 6, 17: 3}, 'GF-ST-01': {17: 0}}
 wrong = []
 by_space = wb['ملخص الكميات حسب الفراغ']
 heads = [str(c.value).replace('\n', ' ') for c in by_space[3]]
@@ -37,6 +37,24 @@ for row in by_space.iter_rows(min_row=4, values_only=True):
             wrong.append(f"{row[1]} {heads[i]}: {row[i]} (expected {want})")
     if row[1] and (len(sys.argv) < 3 or row[1] in sys.argv[2:]):
         print(row[1], {h: (round(v, 4) if isinstance(v, float) else v) for h, v in zip(heads[4:], row[4:]) if v not in (None, 0, '')})
+
+# the in-app report (js/report.js) must show the same numbers as the workbook
+import json, os
+rp = sys.argv[1][:-5] + '.report.json'
+if os.path.exists(rp):
+    rep = json.load(io.open(rp, encoding='utf-8'))
+    n = 0
+    for row in by_space.iter_rows(min_row=4, values_only=True):
+        r = rep.get(row[1])
+        if not r:
+            continue
+        want = {4: r['floor'], 5: r['wall']['gross'], 6: r['wall']['ded'], 7: r['wall']['net'], 8: r['ceil'], 9: r['plaster']['gross'], 10: r['plaster']['ded'],
+                11: r['plaster']['net'], 12: r['linear']['gross'], 13: r['linear']['ded'], 14: r['linear']['net'], 15: r['count']}
+        for i, w in want.items():
+            n += 1
+            if abs((row[i] or 0) - w) > 1e-6:
+                wrong.append(f"report != workbook: {row[1]} {heads[i]}: app {w}, Excel {row[i]}")
+    print('report values compared with the workbook:', n)
 
 sm = wb['ملخص الكميات حسب البند والخامة']
 checks = [(sm[f'A{r}'].value, sm[f'D{r}'].value) for r in range(16, 22)]

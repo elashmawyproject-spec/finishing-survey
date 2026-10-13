@@ -214,9 +214,13 @@
         (rec.wall.ops || []).forEach((o, k) => {
           if (num(o.wid) === null && num(o.hgt) === null) return;
           const isWin = /نافذة|شباك/.test(txt(o.typ));
+          /* an opening cut through plaster at another height (e.g. full wall height) is written as a second record that only deducts plaster */
+          const plH = num(o.plHgt), twoH = plH !== null && plH !== num(o.hgt) && o.pl !== false && plOn;
+          if (twoH) R.OP.push({ code: `${code}-${rec.code}-${k + 1}-L`, sp: code, wall: rec.code, typ: txt(o.typ) || 'باب', wid: num(o.wid), hgt: plH, cnt: num(o.cnt),
+            dfin: NO, dpl: YES, dsk: NO, note: 'نفس الفتحة السابقة — ارتفاع الخصم من اللياسة' });
           R.OP.push({ code: `${code}-${rec.code}-${k + 1}`, sp: code, wall: rec.code, typ: txt(o.typ) || 'باب', wid: num(o.wid), hgt: num(o.hgt), cnt: num(o.cnt),
             dfin: (o.fin !== false && rec.mainMat) ? YES : NO, tgt: (o.fin !== false && rec.mainMat && rec.groups.size > 1) ? rec.mainMat : '',
-            dpl: (o.pl !== false && plOn) ? YES : NO,
+            dpl: (o.pl !== false && plOn && !twoH) ? YES : NO,
             dsk: ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn && !rec.wall.noSk) ? YES : NO, ...flag(o) });
         });
         (rec.wall.feats || []).forEach((f, k) => {
@@ -224,7 +228,7 @@
           R.LN.push({ sp: code, mat: txt(f.mat), desc: `على الحائط ${rec.code} (${k + 1})`, dir: num(f.len), cnt: num(f.cnt), ...flag(f) });
         });
       });
-      if (skOn && perim > 0) R.LN.push({ sp: code, mat: txt(sp.skirt.mat), desc: (sp.walls || []).some(w => w.noSk) ? 'وزرة — الحوائط المحددة فقط' : 'وزرة — محيط الفراغ', dir: Math.round(perim * 1e4) / 1e4, autoq: YES });
+      if (skOn && perim > 0) R.LN.push({ sp: code, mat: txt(sp.skirt.mat), _k: 'skirt', desc: (sp.walls || []).some(w => w.noSk) ? 'وزرة — الحوائط المحددة فقط' : 'وزرة — محيط الفراغ', dir: Math.round(perim * 1e4) / 1e4, autoq: YES });
       if (num(sp.floorStrip) > 0) R.LN.push({ sp: code, mat: txt(sp.floorStripMat) || matName(pr, 'LinMat', 'شرائح ستانلس ستيل'), desc: 'فاصل بين خامات الأرضية', dir: num(sp.floorStrip) });
       (sp.extras || []).forEach((x, i) => {
         const q = calc(x.qty);
@@ -237,10 +241,10 @@
       const st = sp.stair || {};
       if (sp.kind === 'stair' && num(st.steps) > 0 && num(st.width) > 0) {
         const d = t => [t, txt(st.mat), num(st.tread) !== null ? 'نائمة ' + num(st.tread) : '', num(st.riser) !== null ? 'قائمة ' + num(st.riser) : ''].filter(Boolean).join(' — ');
-        R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'نائمة درج'), desc: d('نوائم'), dir: num(st.width), cnt: num(st.steps) });
-        R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'قائمة درج'), desc: d('قوائم'), dir: num(st.width), cnt: num(st.steps) });
+        R.LN.push({ _k: 'tread', sp: code, mat: matName(pr, 'LinMat', 'نائمة درج'), desc: d('نوائم'), dir: num(st.width), cnt: num(st.steps) });
+        R.LN.push({ _k: 'riser', sp: code, mat: matName(pr, 'LinMat', 'قائمة درج'), desc: d('قوائم'), dir: num(st.width), cnt: num(st.steps) });
       }
-      if (sp.kind === 'stair' && num(st.skirtLen) > 0) R.LN.push({ sp: code, mat: matName(pr, 'LinMat', 'وزرة درج'), desc: 'وزرة الدرج', dir: num(st.skirtLen) });
+      if (sp.kind === 'stair' && num(st.skirtLen) > 0) R.LN.push({ _k: 'stsk', sp: code, mat: matName(pr, 'LinMat', 'وزرة درج'), desc: 'وزرة الدرج', dir: num(st.skirtLen) });
     }
     return R;
   }
@@ -305,7 +309,7 @@
       (maps[sheetKey] = maps[sheetKey] || new Map()).set(ref, v);
     };
     for (const k of Object.keys(rows)) {
-      rows[k].forEach((row, i) => { for (const [f, v] of Object.entries(row)) { if (!L.cols[k][f]) throw new Error('عمود غير معروف ' + f); put(k, L.cols[k][f] + (L.r0 + i), v); } });
+      rows[k].forEach((row, i) => { for (const [f, v] of Object.entries(row)) { if (f[0] === '_') continue; if (!L.cols[k][f]) throw new Error('عمود غير معروف ' + f); put(k, L.cols[k][f] + (L.r0 + i), v); } });
     }
     for (const [ref, v] of listCells(pr)) (maps.LS = maps.LS || new Map()).set(ref, v);
     for (const [f, ref] of Object.entries(L.pd)) put('PD', ref, f === 'method' ? 'رفع من الطبيعة' : txt(pr[f]));
@@ -344,7 +348,7 @@
         const a = h !== null ? w * h * c : 0;
         const isWin = /نافذة|شباك/.test(txt(o.typ));
         if (o.fin !== false && main) q.wallDed += a;
-        if (o.pl !== false && plOn) q.plDed += a;
+        if (o.pl !== false && plOn) q.plDed += num(o.plHgt) !== null ? w * num(o.plHgt) * c : a;
         if ((o.sk === undefined ? !(isWin && sp.skirt && sp.skirt.underWin) : o.sk) && skOn && !rec.wall.noSk) q.skDed += w * c;
       });
     });

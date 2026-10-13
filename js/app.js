@@ -4,6 +4,7 @@
   const { num, txt, calc, quantities, exportXlsx, buildRows, reviewCount, materials, matName, MAT_LISTS, SYSTEM, DEF_UNIT, listCap } = globalThis.BOQ;
   const LISTS = globalThis.BOQ_LAYOUT.lists;
   const SEED = globalThis.BOQ_SEED;
+  const REPORT = globalThis.BOQ_REPORT;
   const KEY = 'boq-survey-v2', OLD_KEY = 'boq-survey-v1';
   const LEVELS = ['بدروم', 'أرضي', 'أول', 'ثاني', 'ملحق علوي', 'سطح', 'خارجي'];
   const app = document.getElementById('app');
@@ -142,6 +143,11 @@
       h += `<a class="row" href="#/floor/${encodeURIComponent(l)}"><b>${esc(l)}</b><span class="muted">${sp.filter(s => s.done).length} / ${sp.length}</span></a>`;
     });
     h += `<div class="acts"><button class="btn" data-act="addSpace">＋ فراغ جديد</button><a class="btn" href="#/add">＋ عدة فراغات مرة واحدة</a></div></section>
+      <section class="card"><h2>التقارير</h2>
+      ${levels.map(l => { const sp = P.spaces.filter(s => s.level === l), ok = sp.length && sp.every(s => s.done);
+        return `<a class="row" href="#/report/${encodeURIComponent(l)}"><b>تقرير دور: ${esc(l)}</b><span class="chip ${ok ? 'ok' : 'none'}">${ok ? 'جاهز' : 'مبدئي'}</span></a>`; }).join('')}
+      ${P.spaces.some(s => s.kind === 'stair') ? '<a class="row" href="#/report-stairs"><b>تقرير السلالم</b><span class="muted">كل القلبات</span></a>' : ''}
+      ${levels.length ? '' : '<p class="muted">تظهر التقارير هنا بعد إضافة الفراغات.</p>'}</section>
       <section class="card"><h2>الخامات والبنود</h2>
       <a class="row" href="#/mats"><b>إدارة الخامات</b><span class="muted">إضافة · تعديل اسم · وحدة · حذف</span></a></section>
       <section class="card"><h2>التصدير والحفظ</h2>
@@ -173,8 +179,19 @@
       const [t, c] = statusOf(s);
       h += `<a class="row" href="#/space/${i}"><span><b dir="ltr">${esc(s.code)}</b> <span dir="ltr">${esc(s.name)}</span></span><span>${reviewCount(s) ? `<span class="chip rv">مراجعة ${reviewCount(s)}</span> ` : ''}<span class="chip ${c}">${t}</span></span></a>`;
     });
-    h += `<button class="btn ghost" data-act="addSpace" data-level="${esc(level)}">＋ فراغ جديد في هذا الدور</button></section>`;
+    h += `<button class="btn ghost" data-act="addSpace" data-level="${esc(level)}">＋ فراغ جديد في هذا الدور</button>
+      <a class="btn" href="#/report/${encodeURIComponent(level)}">تقرير هذا الدور</a></section>`;
     app.innerHTML = h;
+  }
+
+  function viewReport(level) {
+    const stairs = level === null;
+    titleEl.textContent = stairs ? 'تقرير السلالم' : 'تقرير الدور: ' + level;
+    backEl.hidden = false; backEl.href = stairs ? '#/p' : '#/floor/' + encodeURIComponent(level);
+    document.title = `${safeName()}_${stairs ? 'Stairs' : level}_${stamp()}`;
+    app.innerHTML = `<div class="acts noprint"><button class="btn primary" data-act="print">طباعة / حفظ PDF</button></div>
+      <p class="muted noprint">في نافذة الطباعة اختر «حفظ بتنسيق PDF» كطابعة.</p>
+      <article class="rep">${stairs ? REPORT.stairsHtml(P) : REPORT.floorHtml(P, level)}</article>`;
   }
 
   function viewMats(list) {
@@ -225,7 +242,8 @@
         <div class="grid4">${fld('النوع', sel(`${ob}.typ`, txt(o.typ), 'OpenTypes'))}${fld('العرض', numInp(`${ob}.wid`, o.wid))}
         ${fld('الارتفاع', numInp(`${ob}.hgt`, o.hgt))}${fld('العدد', numInp(`${ob}.cnt`, o.cnt, '1'))}</div>
         <div class="chks"><span class="muted">تُخصم من:</span>${chk(`${ob}.fin`, o.fin !== false, 'التشطيب')}${chk(`${ob}.pl`, o.pl !== false, 'اللياسة')}
-        ${chk(`${ob}.sk`, o.sk === undefined ? skDef : o.sk, 'الوزرة')}</div>${revRow(ob, o)}</div>`;
+        ${chk(`${ob}.sk`, o.sk === undefined ? skDef : o.sk, 'الوزرة')}</div>
+        ${o.pl !== false ? `<div class="grid2">${fld('ارتفاع الخصم من اللياسة (إن اختلف)', numInp(`${ob}.plHgt`, o.plHgt, 'نفس ارتفاع الفتحة'))}</div>` : ''}${revRow(ob, o)}</div>`;
     });
     (w.feats || []).forEach((f, k) => {
       const fb = `${base}.feats.${k}`;
@@ -332,10 +350,13 @@
   function route(keepScroll) {
     const y = window.scrollY;
     const h = location.hash;
-    const m = h.match(/^#\/(floor|space)\/(.+)$/);
+    document.title = 'حصر التشطيبات';
+    const m = h.match(/^#\/(floor|space|report)\/(.+)$/);
     if (!P || h === '' || h === '#/' || h === '#') { cur = { view: 'projects' }; viewProjects(); }
     else if (m && m[1] === 'floor') { cur = { view: 'floor', level: decodeURIComponent(m[2]) }; viewFloor(cur.level); }
     else if (m && m[1] === 'space') { cur = { view: 'space', i: Number(m[2]) }; viewSpace(cur.i); }
+    else if (m && m[1] === 'report') { cur = { view: 'report', level: decodeURIComponent(m[2]) }; viewReport(cur.level); }
+    else if (h === '#/report-stairs') { cur = { view: 'report' }; viewReport(null); }
     else if (h === '#/add') { cur = { view: 'add' }; viewAdd(); }
     else if (h.startsWith('#/mats')) { cur = { view: 'mats', list: MAT_LISTS.includes(h.slice(7)) ? h.slice(7) : 'FloorMat' }; viewMats(cur.list); }
     else { cur = { view: 'home' }; viewHome(); }
@@ -366,7 +387,7 @@
     }
     setPath(target, p, val);
     save();
-    if (el.dataset.rerender || (el.type === 'checkbox' && /^(ceil\.same|skirt\.underWin)$/.test(p))) { route(true); return; }
+    if (el.dataset.rerender || (el.type === 'checkbox' && /^(ceil\.same|skirt\.underWin|walls\.\d+\.ops\.\d+\.pl)$/.test(p))) { route(true); return; }
     if (el.type === 'checkbox' && /\.rev$/.test(p)) el.closest('.rev').classList.toggle('on', el.checked);
     const em = p.match(/^extras\.(\d+)\.(qty|cnt)$/);
     if (em) { const c = app.querySelector(`[data-calc="${em[1]}"]`); if (c) c.innerHTML = extraResult(target.extras[em[1]]); }
@@ -459,6 +480,7 @@
     if (!b) return;
     const act = b.dataset.act, d = { ...b.dataset, i: Number(b.dataset.i) };
     if (act === 'export') return void doExport(b);
+    if (act === 'print') { window.print(); return; }
     if (act === 'backup') { const { id, ...copy } = P; download(new TextEncoder().encode(JSON.stringify(copy, null, 1)), `${safeName()}_backup_${stamp()}.json`, 'application/json'); return; }
     if (act === 'restore') { document.getElementById('restoreFile').click(); return; }
     if (act === 'newProject') {

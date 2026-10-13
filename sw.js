@@ -1,6 +1,6 @@
 /* Offline support: the app shell is cached so the survey works on site without a connection. */
-const CACHE = 'boq-survey-v2';
-const FILES = ['./', 'index.html', 'app.css', 'manifest.webmanifest', 'js/layout.js', 'js/template.js', 'js/export.js', 'js/seed.js', 'js/app.js',
+const CACHE = 'boq-survey-v3';
+const FILES = ['./', 'index.html', 'app.css', 'manifest.webmanifest', 'js/layout.js', 'js/template.js', 'js/export.js', 'js/report.js', 'js/seed.js', 'js/app.js',
   'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
